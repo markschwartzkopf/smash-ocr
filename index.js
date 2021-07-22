@@ -1,30 +1,19 @@
 const fs = require("fs");
-const Tesseract = require("tesseract.js");
-const { PSM } = Tesseract;
 const Filter = require("node-image-filter");
-const fill = require("flood-fill");
 const Jimp = require("jimp");
+const xml2js = require("xml2js");
+const parser = new xml2js.Parser();
 const obsWebsocketJs = require("obs-websocket-js");
 const obs = new obsWebsocketJs();
+const { exec } = require("child_process");
 
-const { createWorker } = Tesseract;
-const myRecognize = async (image, langs, options) => {
-  const worker = createWorker(options);
-  await worker.load();
-  await worker.loadLanguage("digits");
-  await worker.initialize("digits");
-  //await worker.loadLanguage(langs);
-  //await worker.initialize(langs);
-  await worker.setParameters({
-    tessedit_pageseg_mode: PSM.SINGLE_WORD,
-    tessedit_char_whitelist: "0123456789",
-    tessjs_create_hocr: 0,
-    tessjs_create_tsv: 0,
-  });
-  return worker.recognize(image).finally(async () => {
-    await worker.terminate();
-  });
-};
+const confidenceThreshold = 90;
+let p1Count = 0;
+let p2Count = 0;
+p1Score = -1;
+p2Score = -1;
+p1Maybe = -1;
+p2Maybe = -1;
 
 let CustomInvertFilter = function (pixels) {
   var data = pixels.data;
@@ -76,7 +65,7 @@ let CustomInvertFilter = function (pixels) {
           g +
           hueDiff * 300;
       }
-      if (diff < 90 && curr[0] + curr[1] + curr[2] > 150) {
+      if (diff < 150 && curr[0] + curr[1] + curr[2] > 150) {
         dataCopy[px * 4] = 0;
         dataCopy[px * 4 + 1] = 0;
         dataCopy[px * 4 + 2] = 0;
@@ -86,67 +75,190 @@ let CustomInvertFilter = function (pixels) {
 
   return dataCopy;
 };
+
+let i = 1;
 obs
-  .connect({ address: "localhost:4444", password: 'pbmax' })
+  .connect({ address: "localhost:4444", password: "pbmax" })
   .then(() => {
-    
     infiniteOCR();
   })
   .catch((err) => {
     console.log(err);
-  })
-
-function infiniteOCR()
-{obs.send('TakeSourceScreenshot', {sourceName: 'OCR', saveToFilePath: __dirname + "/OBS.png"}).then(() => {
-  //let start = Date.now();
-  console.log(0)
-  Filter.render(__dirname + "/OBS.png", CustomInvertFilter, (result) => {
-    result.data.pipe(fs.createWriteStream("result.png"));
   });
-  console.log(1)
-  //console.log("elapsed:" + (Date.now() - start));
-  Jimp.read(__dirname + "/result.png")
-    .then((testImg) => {
-      console.log(2)
-      return testImg
-        .scale(0.9)
-        .scan(0, 0, testImg.bitmap.width, testImg.bitmap.height, (x, y, idx) => {
-          let brightness =
-            testImg.bitmap.data[idx] +
-            testImg.bitmap.data[idx + 1] +
-            testImg.bitmap.data[idx + 2];
-          if (brightness < 255 * 3)
-            testImg.bitmap.data[idx] =
-              testImg.bitmap.data[idx + 1] =
-              testImg.bitmap.data[idx + 2] =
-                0;
-        })
-        .write("result2.png");
+
+function infiniteOCR() {
+  let start = Date.now();
+  obs
+    .send("TakeSourceScreenshot", {
+      sourceName: "OCR",
+      saveToFilePath: __dirname + "/OBS.png",
     })
     .then(() => {
-      //console.log("elapsed:" + (Date.now() - start));
-      /* nocr.decodeFile(__dirname + "/result2.png", function(error, data){
-        console.log(data); // Hello World!
-        console.log("elapsed:" + (Date.now() - start));
-      }); */
-      console.log(3)
-      myRecognize(__dirname + "/result2.png", "eng", {
-        //logger: (m) => console.log(m),
-      }).then((res) => {
-        //console.log(Object.getOwnPropertyNames(res.data));
-        /* fs.writeFile("ocrData.json", JSON.stringify(res.data.symbols), (err) => {
-          if (err) console.error(err);
-        }); */
-        let text = res.data.text.replace(/[^0-9]/gi, "");
-        console.log("text: " + text + " confidence: " + res.data.confidence);
-        infiniteOCR();
-        //console.log("elapsed:" + (Date.now() - start));
+      //console.log("elapsedOBS:" + (Date.now() - start));
+      //start = Date.now();
+      return new Promise((res, rej) => {
+        Filter.render(__dirname + "/OBS.png", CustomInvertFilter, (result) => {
+          let fileStream = fs.createWriteStream("processed.png");
+          result.data.pipe(fileStream);
+          fileStream.on("close", () => {
+            res();
+          });
+        });
       });
+    })
+    .then(() => {
+      fs.unlinkSync(__dirname + "/OBS.png");
+      //console.log("elapsedInvert:" + (Date.now() - start));
+      //start = Date.now();
+      return Jimp.read(__dirname + "/processed.png");
+    })
+    .then((char1_0) => {
+      fs.unlinkSync(__dirname + "/processed.png");
+      //console.log("elapsedJimpRead:" + (Date.now() - start));
+      //start = Date.now();
+      let char1_1 = char1_0.clone();
+      let char1_2 = char1_0.clone();
+      let char2_0 = char1_0.clone();
+      let char2_1 = char1_0.clone();
+      let char2_2 = char1_0.clone();
+      char1_0.crop(73, 2, 33, 44).write(__dirname + "/char1_0.png");
+      char1_1.crop(40, 2, 33, 44).write(__dirname + "/char1_1.png");
+      char1_2.crop(6, 2, 33, 44).write(__dirname + "/char1_2.png");
+      char2_0.crop(566, 2, 33, 44).write(__dirname + "/char2_0.png");
+      char2_1.crop(534, 2, 33, 44).write(__dirname + "/char2_1.png");
+      char2_2.crop(500, 2, 33, 44).write(__dirname + "/char2_2.png");
+    })
+    .then(() => {
+      //console.log("elapsedJimpCrop:" + (Date.now() - start));
+      //start = Date.now();
+      return pngsToOcrData([
+        "char1_0.png",
+        "char1_1.png",
+        "char1_2.png",
+        "char2_0.png",
+        "char2_1.png",
+        "char2_2.png",
+      ]);
+    })
+    .then((data) => {
+      dataToScores(data);
+      console.log(
+        "1:" + p1Score + " c1:" + p1Count + " 2:" + p2Score + " c2:" + p2Count
+      );
+      //console.log("elapsedOCR:" + (Date.now() - start));
+      start = Date.now();
+    })
+    .then(() => {
+      i++;
+      setTimeout(() => {
+        infiniteOCR();
+      }, 10);
+    })
+    .catch((err) => {
+      console.log(JSON.stringify(err));
     });
-})}
+}
 
+function pngsToOcrData(filenames) {
+  return new Promise((res, rej) => {
+    pngsToHocr(filenames, "temp")
+      .then(() => {
+        return hocrFileToData(__dirname + "/temp.hocr", filenames.length);
+      })
+      .then((data) => {
+        fs.unlink(__dirname + "/temp.hocr", (err) => {
+          rej(err);
+        });
+        res(data);
+      });
+  });
+}
 
+function dataToScores(data) {
+  let player1Score = -1;
+  if (data[0].conf > confidenceThreshold) {
+    p1Count = 0;
+    player1Score = data[0].digit;
+    if (data[1].conf > confidenceThreshold) {
+      player1Score += data[1].digit * 10;
+      if (data[2].conf > confidenceThreshold) {
+        player1Score += data[1].digit * 100;
+      }
+    }
+  } else p1Count++;
+  if (player1Score > p1Score) {
+    if ((p1Maybe = player1Score)) {
+      p1Score = player1Score;
+    } else p1Maybe = player1Score
+  }
+  let player2Score = -1;
+  if (data[3].conf > confidenceThreshold) {
+    p2Count = 0;
+    player2Score = data[3].digit;
+    if (data[4].conf > confidenceThreshold) {
+      player2Score += data[4].digit * 10;
+      if (data[5].conf > confidenceThreshold) {
+        player2Score += data[5].digit * 100;
+      }
+    }
+  } else p2Count++;
+  if (player2Score > p2Score) {
+    if ((p2Maybe = player2Score)) {
+      p2Score = player2Score;
+    } else p2Maybe = player2Score
+  }
+}
 
+function pngsToHocr(inFiles, outPath) {
+  return new Promise((res, rej) => {
+    let filelist = "";
+    inFiles.forEach((x, index) => {
+      filelist += x;
+      if (index < inFiles.length - 1) filelist += "\n";
+    });
+    fs.writeFileSync(__dirname + "/filelist.txt", filelist);
+    exec(
+      "wsl tesseract filelist.txt " + outPath + " --dpi 300 -l digits smashbox",
+      (error, stdout, stderr) => {
+        if (error) {
+          rej("OCRError: " + error.message);
+        } else {
+          fs.unlink(__dirname + "/filelist.txt", (err) => {
+            rej(err);
+          });
+          res();
+        }
+      }
+    );
+  });
+}
+
+function hocrFileToData(path, length) {
+  return new Promise((res, rej) => {
+    fs.readFile(path, function (err, data) {
+      if (err) {
+        rej(err);
+      } else {
+        parser.parseString(data, function (err, result) {
+          let rtn = [];
+          for (let x = 0; x < length; x++) {
+            let hocrChar =
+              result?.html?.body?.[0]?.div?.[x].div?.[0]?.p?.[0]?.span?.[0]
+                ?.span?.[0];
+            let digit = hocrChar?._[0];
+            let conf = hocrChar?.$?.title;
+            if (typeof conf == "string") {
+              conf = conf.split("x_wconf ")[1];
+            }
+            if (!conf) conf = 0;
+            rtn.push({ digit: parseInt(digit), conf: parseInt(conf) });
+          }
+          res(rtn);
+        });
+      }
+    });
+  });
+}
 
 function RGBToHSL(rgb) {
   // Make r, g, and b fractions of 1

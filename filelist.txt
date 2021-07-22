@@ -1,0 +1,6 @@
+char1_0.png
+char1_1.png
+char1_2.png
+char2_0.png
+char2_1.png
+char2_2.png
