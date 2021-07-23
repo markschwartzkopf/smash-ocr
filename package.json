@@ -9,12 +9,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "flood-fill": "^0.1.1",
     "jimp": "^0.16.1",
-    "nocr": "^1.2.0",
     "node-image-filter": "^1.0.0",
     "obs-websocket-js": "^4.0.2",
-    "tesseract.js": "^2.1.4",
     "xml2js": "^0.4.23"
   }
 }

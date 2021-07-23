@@ -7,13 +7,14 @@ const obsWebsocketJs = require("obs-websocket-js");
 const obs = new obsWebsocketJs();
 const { exec } = require("child_process");
 
-const confidenceThreshold = 90;
+const nodeCGUrl = "";
+const confidenceThreshold = 85;
 let p1Count = 0;
 let p2Count = 0;
 p1Score = -1;
 p2Score = -1;
-p1Maybe = -1;
-p2Maybe = -1;
+p1Guess = [-1, -1, -1, -1];
+p2Guess = [-1, -1, -1, -1];
 
 let CustomInvertFilter = function (pixels) {
   var data = pixels.data;
@@ -65,7 +66,7 @@ let CustomInvertFilter = function (pixels) {
           g +
           hueDiff * 300;
       }
-      if (diff < 150 && curr[0] + curr[1] + curr[2] > 150) {
+      if (diff < 170 && curr[0] + curr[1] + curr[2] > 150) {
         dataCopy[px * 4] = 0;
         dataCopy[px * 4 + 1] = 0;
         dataCopy[px * 4 + 2] = 0;
@@ -87,6 +88,9 @@ obs
   });
 
 function infiniteOCR() {
+  let char1_0;
+  let oldChar1_2;
+  let oldChar2_2;
   let start = Date.now();
   obs
     .send("TakeSourceScreenshot", {
@@ -112,8 +116,21 @@ function infiniteOCR() {
       //start = Date.now();
       return Jimp.read(__dirname + "/processed.png");
     })
-    .then((char1_0) => {
+    .then((processed) => {
       fs.unlinkSync(__dirname + "/processed.png");
+      char1_0 = processed;
+      if (fs.existsSync(__dirname + "/char1_2save.png")) {
+        return Jimp.read(__dirname + "/char1_2save.png");
+      }
+    })
+    .then((old1) => {
+      oldChar1_2 = old1;
+      if (fs.existsSync(__dirname + "/char2_2save.png")) {
+        return Jimp.read(__dirname + "/char2_2save.png");
+      }
+    })
+    .then((old2) => {
+      oldChar2_2 = old2;
       //console.log("elapsedJimpRead:" + (Date.now() - start));
       //start = Date.now();
       let char1_1 = char1_0.clone();
@@ -121,12 +138,20 @@ function infiniteOCR() {
       let char2_0 = char1_0.clone();
       let char2_1 = char1_0.clone();
       let char2_2 = char1_0.clone();
-      char1_0.crop(73, 2, 33, 44).write(__dirname + "/char1_0.png");
-      char1_1.crop(40, 2, 33, 44).write(__dirname + "/char1_1.png");
-      char1_2.crop(6, 2, 33, 44).write(__dirname + "/char1_2.png");
-      char2_0.crop(566, 2, 33, 44).write(__dirname + "/char2_0.png");
-      char2_1.crop(534, 2, 33, 44).write(__dirname + "/char2_1.png");
-      char2_2.crop(500, 2, 33, 44).write(__dirname + "/char2_2.png");
+      char1_0.crop(73, 2, 34, 45).write(__dirname + "/char1_0.png");
+      char1_1.crop(40, 2, 34, 45).write(__dirname + "/char1_1.png");
+      char1_2.crop(6, 2, 34, 45).write(__dirname + "/char1_2save.png");
+      if (!!oldChar1_2) {
+        char1_2.composite(oldChar1_2, 0, 0, { mode: Jimp.BLEND_MULTIPLY });
+      }
+      char1_2.write(__dirname + "/char1_2.png");
+      char2_0.crop(566, 2, 34, 45).write(__dirname + "/char2_0.png");
+      char2_1.crop(534, 2, 34, 45).write(__dirname + "/char2_1.png");
+      char2_2.crop(500, 2, 34, 45).write(__dirname + "/char2_2save.png");
+      if (!!oldChar2_2) {
+        char2_2.composite(oldChar2_2, 0, 0, { mode: Jimp.BLEND_MULTIPLY });
+      }
+      char2_2.write(__dirname + "/char2_2.png");
     })
     .then(() => {
       //console.log("elapsedJimpCrop:" + (Date.now() - start));
@@ -143,16 +168,27 @@ function infiniteOCR() {
     .then((data) => {
       dataToScores(data);
       console.log(
-        "1:" + p1Score + " c1:" + p1Count + " 2:" + p2Score + " c2:" + p2Count
+        "1:" +
+          p1Score +
+          " c1:" +
+          p1Count +
+          " 2:" +
+          p2Score +
+          " c2:" +
+          p2Count +
+          " " +
+          p1Guess[3] +
+          " " +
+          p2Guess[3]
       );
       //console.log("elapsedOCR:" + (Date.now() - start));
       start = Date.now();
     })
     .then(() => {
       i++;
-      setTimeout(() => {
-        infiniteOCR();
-      }, 10);
+      infiniteOCR();
+      /* setTimeout(() => {
+      }, 10); */
     })
     .catch((err) => {
       console.log(JSON.stringify(err));
@@ -170,6 +206,9 @@ function pngsToOcrData(filenames) {
           rej(err);
         });
         res(data);
+      })
+      .catch((err) => {
+        rej(err);
       });
   });
 }
@@ -186,10 +225,20 @@ function dataToScores(data) {
       }
     }
   } else p1Count++;
-  if (player1Score > p1Score) {
-    if ((p1Maybe = player1Score)) {
+  if (p1Count > 20) p1Score = -1;
+  //if (player1Score > p1Score)
+  //if (player1Score > -1)
+  {
+    p1Guess.push(player1Score);
+    p1Guess.shift();
+    let p1Maybe = p1Guess[0];
+    p1Guess.forEach((x) => {
+      if (x != p1Maybe) p1Maybe = -2;
+    });
+    if (p1Maybe == player1Score && p1Score != player1Score) {
       p1Score = player1Score;
-    } else p1Maybe = player1Score
+      console.log("New P1 score:" + p1Score);
+    }
   }
   let player2Score = -1;
   if (data[3].conf > confidenceThreshold) {
@@ -202,10 +251,20 @@ function dataToScores(data) {
       }
     }
   } else p2Count++;
-  if (player2Score > p2Score) {
-    if ((p2Maybe = player2Score)) {
+  if (p2Count > 20) p2Score = -1;
+  //if (player2Score > p2Score)
+  //if (player2Score > -1)
+  {
+    p2Guess.push(player2Score);
+    p2Guess.shift();
+    let p2Maybe = p2Guess[0];
+    p2Guess.forEach((x) => {
+      if (x != p2Maybe) p2Maybe = -2;
+    });
+    if (p2Maybe == player2Score && p2Score != player2Score) {
       p2Score = player2Score;
-    } else p2Maybe = player2Score
+      console.log("New P2 score:" + p2Score);
+    }
   }
 }
 
